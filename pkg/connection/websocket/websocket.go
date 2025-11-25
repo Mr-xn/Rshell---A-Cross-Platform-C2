@@ -176,36 +176,82 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			case 22: //文件下载第一条信息
 				fileLen := int(binary.BigEndian.Uint32(data[:4]))
 				filePath := string(data[4:])
+
+				// 使用通用的安全路径函数
+				fullPath, err := utils.GetSafeFilePath(uid, filePath)
+				if err != nil {
+					log.Printf("Security check failed: %v", err)
+					break
+				}
+
+				// 确保下载目录存在
+				downloadDir := filepath.Dir(fullPath) // 从安全路径获取目录
+				if err := os.MkdirAll(downloadDir, 0755); err != nil {
+					log.Printf("Failed to create download directory: %v", err)
+					break
+				}
+
+				// 更新数据库
 				sql := `
 UPDATE downloads
 SET file_size = ?, downloaded_size = ?
 WHERE uid = ? AND file_path = ?;
 `
-				database.Engine.QueryString(sql, fileLen, 0, uid, filePath)
-				_, err = os.Stat("./Downloads/" + uid)
-				if os.IsNotExist(err) {
-					// 文件夹不存在，创建文件夹
-					err = os.MkdirAll("./Downloads/"+uid, os.ModePerm)
+				_, err = database.Engine.QueryString(sql, fileLen, 0, uid, filePath)
+				if err != nil {
+					log.Printf("Database update failed: %v", err)
 				}
 
-				// 检查文件是否存在
-				if _, err := os.Stat("./Downloads/" + uid + "/" + filepath.Base(filePath)); err == nil {
-					// 删除文件
-					os.Remove("./Downloads/" + uid + "/" + filepath.Base(filePath))
+				// 检查文件是否存在，如果存在则删除
+				if _, err := os.Stat(fullPath); err == nil {
+					if err := os.Remove(fullPath); err != nil {
+						log.Printf("Failed to remove existing file: %v", err)
+						break
+					}
 				}
-				fp, _ := os.OpenFile("./Downloads/"+uid+"/"+filepath.Base(filePath), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.ModePerm)
+
+				// 创建新文件（使用安全路径）
+				fp, err := os.OpenFile(fullPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+				if err != nil {
+					log.Printf("Failed to create file: %v", err)
+					break
+				}
 				defer fp.Close()
 			case command.DOWNLOAD: //文件下载
 				filePathLen := int(binary.BigEndian.Uint32(data[:4]))
 				filePath := string(data[4 : 4+filePathLen])
 				fileContent := data[4+filePathLen:]
+
+				// 使用通用的安全路径函数
+				fullPath, err := utils.GetSafeFilePath(uid, filePath)
+				if err != nil {
+					log.Printf("Security check failed: %v", err)
+					break
+				}
+
 				var fileDownloads database.Downloads
 				database.Engine.Where("uid = ? AND file_path = ?", uid, filePath).Get(&fileDownloads)
 				fileDownloads.DownloadedSize += len(fileContent)
 				database.Engine.Where("uid = ? AND file_path = ?", uid, filePath).Update(&fileDownloads)
-				fp, _ := os.OpenFile("./Downloads/"+uid+"/"+filepath.Base(filePath), os.O_APPEND|os.O_WRONLY, os.ModePerm)
-				fp.Write(fileContent)
-				fp.Close()
+
+				// 确保目录存在
+				downloadDir := filepath.Dir(fullPath)
+				if err := os.MkdirAll(downloadDir, 0755); err != nil {
+					log.Printf("Failed to create download directory: %v", err)
+					break
+				}
+
+				// 使用安全路径打开文件
+				fp, err := os.OpenFile(fullPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+				if err != nil {
+					log.Printf("Failed to open file: %v", err)
+					break
+				}
+				defer fp.Close()
+
+				if _, err := fp.Write(fileContent); err != nil {
+					log.Printf("Failed to write file content: %v", err)
+				}
 
 			case command.DRIVES:
 				drives := utils.GetExistingDrives(data)

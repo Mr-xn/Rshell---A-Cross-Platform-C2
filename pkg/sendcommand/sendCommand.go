@@ -14,6 +14,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/gorilla/websocket"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -61,7 +62,17 @@ func SendCommand(uid string, command string) {
 		cmd := strings.TrimPrefix(command, "kill ")
 		cmdTypeBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(cmdTypeBytes, uint32(command1.KILL))
-		pid, _ := strconv.Atoi(cmd)
+
+		pid, err := strconv.ParseInt(cmd, 10, 64)
+		if err != nil {
+			return // 或者处理错误
+		}
+
+		// 检查 PID 是否在 uint32 有效范围内
+		if pid < 0 || pid > math.MaxUint32 {
+			return // 或者处理错误
+		}
+
 		pidBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(pidBytes, uint32(pid))
 		byteToSend = append(cmdTypeBytes, pidBytes...)

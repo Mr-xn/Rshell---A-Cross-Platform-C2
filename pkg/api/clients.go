@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"github.com/gin-gonic/gin"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -289,28 +290,89 @@ func DownloadFile(c *gin.Context) {
 		Uid      string `json:"uid"`
 		FilePath string `json:"filePath"`
 	}
+
 	if err := c.ShouldBindJSON(&fileBody); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
-	_, err := os.Stat("./Downloads/" + fileBody.Uid)
-	if os.IsNotExist(err) {
-		// 文件夹不存在，创建文件夹
-		err = os.MkdirAll("./Downloads/"+fileBody.Uid, os.ModePerm)
+	// 验证输入参数
+	if fileBody.Uid == "" || fileBody.FilePath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "UID and file path are required"})
+		return
 	}
 
+	// 验证 UID 格式
+	if strings.Contains(fileBody.Uid, "..") || strings.Contains(fileBody.Uid, "/") || strings.Contains(fileBody.Uid, "\\") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UID format"})
+		return
+	}
+
+	// 验证文件路径基本安全性
+	if fileBody.FilePath == "" || fileBody.FilePath == "." || fileBody.FilePath == ".." {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file path"})
+		return
+	}
+
+	// 使用安全路径创建下载目录
+	downloadDir := filepath.Join("./Downloads", fileBody.Uid)
+
+	// 确保下载目录存在
+	if err := os.MkdirAll(downloadDir, 0755); err != nil {
+		log.Printf("Failed to create download directory: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create download directory"})
+		return
+	}
+
+	// 获取安全的文件名用于数据库存储
+	safeFileName := filepath.Base(fileBody.FilePath)
+	safeFileName = strings.ReplaceAll(safeFileName, "/", "")
+	safeFileName = strings.ReplaceAll(safeFileName, "\\", "")
+
+	if safeFileName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file name"})
+		return
+	}
+
+	// 数据库操作
 	var fileDownloads database.Downloads
-	exist, _ := database.Engine.Where("uid = ? AND file_path = ?", fileBody.Uid, fileBody.FilePath).Get(&fileDownloads)
+	exist, err := database.Engine.Where("uid = ? AND file_path = ?", fileBody.Uid, fileBody.FilePath).Get(&fileDownloads)
+	if err != nil {
+		log.Printf("Database query failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
 	if !exist {
-		database.Engine.Insert(&database.Downloads{Uid: fileBody.Uid, FileName: filepath.Base(fileBody.FilePath), FilePath: fileBody.FilePath, FileSize: 0, DownloadedSize: 0})
+		// 插入新记录
+		downloadRecord := &database.Downloads{
+			Uid:            fileBody.Uid,
+			FileName:       safeFileName,
+			FilePath:       fileBody.FilePath,
+			FileSize:       0,
+			DownloadedSize: 0,
+		}
+		if _, err := database.Engine.Insert(downloadRecord); err != nil {
+			log.Printf("Failed to insert download record: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create download record"})
+			return
+		}
 	} else {
+		// 更新现有记录
 		sql := `
 UPDATE downloads
 SET file_size = ?, downloaded_size = ?
 WHERE uid = ? AND file_path = ?;
 `
-		database.Engine.QueryString(sql, 0, 0, fileBody.Uid, fileBody.FilePath)
+		_, err := database.Engine.Exec(sql, 0, 0, fileBody.Uid, fileBody.FilePath)
+		if err != nil {
+			log.Printf("Failed to update download record: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update download record"})
+			return
+		}
 	}
+
+	// 发送下载命令
 	sendcommand.SendCommand(fileBody.Uid, "download "+fileBody.FilePath)
 	c.JSON(http.StatusOK, gin.H{"status": http.StatusOK})
 }
@@ -352,20 +414,38 @@ func DownloadDownloadedFile(c *gin.Context) {
 		Uid      string `json:"uid"`
 		FilePath string `json:"filePath"`
 	}
+
 	if err := c.BindJSON(&downloadBody); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	// 指定文件的完整路径
-	fileph := filepath.Join("./Downloads", downloadBody.Uid, filepath.Base(downloadBody.FilePath))
 
-	// 读取文件并设置响应头
+	// 使用通用的安全路径函数验证文件路径
+	fullPath, err := utils.GetSafeFilePath(downloadBody.Uid, downloadBody.FilePath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file path"})
+		return
+	}
+
+	// 检查文件是否存在
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	// 获取安全的文件名用于下载
+	safeFileName := filepath.Base(downloadBody.FilePath)
+	safeFileName = strings.ReplaceAll(safeFileName, "/", "")
+	safeFileName = strings.ReplaceAll(safeFileName, "\\", "")
+
+	// 设置响应头
 	c.Header("Content-Description", "File Transfer")
 	c.Header("Content-Transfer-Encoding", "binary")
-	c.Header("Content-Disposition", "attachment; filename="+filepath.Base(downloadBody.FilePath))
+	c.Header("Content-Disposition", "attachment; filename="+safeFileName)
 	c.Header("Content-Type", "application/octet-stream")
 
 	// 发送文件
-	c.File(fileph)
+	c.File(fullPath)
 }
 func ListDrives(c *gin.Context) {
 	var drivesBody struct {

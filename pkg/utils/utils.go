@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -188,4 +189,35 @@ func WriteInt(nInt int) []byte {
 	bBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(bBytes, uint32(nInt))
 	return bBytes
+}
+
+func GetSafeFilePath(uid, filePath string) (string, error) {
+	// 验证 UID 格式
+	if uid == "" || strings.Contains(uid, "..") || strings.Contains(uid, "/") || strings.Contains(uid, "\\") {
+		return "", fmt.Errorf("invalid UID")
+	}
+
+	// 获取安全文件名
+	safeFileName := filepath.Base(filePath)
+	if safeFileName == "" || safeFileName == "." || safeFileName == ".." {
+		return "", fmt.Errorf("invalid filename")
+	}
+
+	// 清理文件名
+	safeFileName = strings.ReplaceAll(safeFileName, "/", "")
+	safeFileName = strings.ReplaceAll(safeFileName, "\\", "")
+
+	// 构建安全路径
+	downloadDir := filepath.Join("./Downloads", uid)
+	fullPath := filepath.Join(downloadDir, safeFileName)
+
+	// 验证路径安全性
+	cleanFullPath := filepath.Clean(fullPath)
+	cleanDownloadDir := filepath.Clean(downloadDir)
+
+	if !strings.HasPrefix(cleanFullPath, cleanDownloadDir+string(os.PathSeparator)) && cleanFullPath != cleanDownloadDir {
+		return "", fmt.Errorf("path traversal attempt")
+	}
+
+	return fullPath, nil
 }
