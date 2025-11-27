@@ -4,6 +4,7 @@ import (
 	"BackendTemplate/pkg/database"
 	"BackendTemplate/pkg/encrypt"
 	"BackendTemplate/pkg/godonut"
+	"BackendTemplate/pkg/logger"
 	"bytes"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -41,7 +42,7 @@ func StartWebDelivery(c *gin.Context) {
 
 	inUse, err := isPortInUse(web.Port)
 	if err != nil {
-		fmt.Printf("检测端口 %s 时发生错误: %v\n", web.Port, err)
+		logger.Error("检测端口 %s 时发生错误: %v\n", web.Port, err)
 	}
 	if inUse {
 		c.JSON(http.StatusOK, gin.H{"status": 400, "data": web.Port + "端口被占用"})
@@ -187,7 +188,7 @@ func OpenWebDelivery(c *gin.Context) {
 	}
 	inUse, err := isPortInUse(web.Port)
 	if err != nil {
-		fmt.Printf("检测端口 %s 时发生错误: %v\n", web.Port, err)
+		logger.Error("检测端口 %s 时发生错误: %v\n", web.Port, err)
 	}
 	if inUse {
 		c.JSON(http.StatusOK, gin.H{"status": 400, "data": web.Port + "端口被占用"})
@@ -288,7 +289,7 @@ func OpenWebDelivery(c *gin.Context) {
 	// 启动服务器（非阻塞）
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Println(err)
+			logger.Error(err.Error())
 		}
 	}()
 

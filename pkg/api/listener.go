@@ -8,7 +8,7 @@ import (
 	"BackendTemplate/pkg/connection/tcp"
 	"BackendTemplate/pkg/connection/websocket"
 	"BackendTemplate/pkg/database"
-	"fmt"
+	"BackendTemplate/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/xtaci/kcp-go/v5"
 	"log"
@@ -41,7 +41,7 @@ func AddListener(c *gin.Context) {
 	}
 	inUse, err := isPortInUse(port)
 	if err != nil {
-		fmt.Printf("检测端口 %s 时发生错误: %v\n", port, err)
+		logger.Error("检测端口 %s 时发生错误: %v\n", port, err)
 	}
 	if inUse {
 		c.JSON(http.StatusOK, gin.H{"status": 400, "data": port + "端口被占用"})
@@ -75,7 +75,7 @@ func OpenListener(c *gin.Context) {
 	}
 	inUse, err := isPortInUse(port)
 	if err != nil {
-		fmt.Printf("检测端口 %s 时发生错误: %v\n", port, err)
+		logger.Error("检测端口 %s 时发生错误: %v\n", port, err)
 	}
 	if inUse {
 		c.JSON(http.StatusOK, gin.H{"status": 400, "data": port + "端口被占用"})
@@ -141,25 +141,25 @@ func handleOpenPort(listenerType string, listenerAddress string) {
 		connection.HttpServer[listenerAddress] = server
 		connection.MuClientListenerType.Unlock()
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("listen: %s\n", err)
+			logger.Error("listen: %s\n", err)
 			return
 		}
 
 	case "tcp":
 		tcpListener, err := net.Listen("tcp", listenerAddress)
 		if err != nil {
-			fmt.Println("Error listening:", err)
+			logger.Error("Error listening:", err)
 			return
 		}
 		connection.MuClientListenerType.Lock()
 		connection.TCPServer[listenerAddress] = tcpListener
 		connection.MuClientListenerType.Unlock()
-		fmt.Println("Listening on:", listenerAddress)
+		logger.Info("Listening on:", listenerAddress)
 
 		for {
 			conn, err := tcpListener.Accept()
 			if err != nil {
-				fmt.Println("Error accepting connection:", err)
+				logger.Error("Error accepting connection:", err)
 				break
 			}
 
@@ -170,7 +170,7 @@ func handleOpenPort(listenerType string, listenerAddress string) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("Server listening on", listenerAddress)
+		logger.Error("Server listening on", listenerAddress)
 		connection.MuClientListenerType.Lock()
 		connection.KCPServer[listenerAddress] = lis
 		connection.MuClientListenerType.Unlock()
@@ -178,10 +178,10 @@ func handleOpenPort(listenerType string, listenerAddress string) {
 		for {
 			conn, err := lis.AcceptKCP()
 			if err != nil {
-				log.Println("Accept error:", err)
+				logger.Error("Accept error:", err)
 				break
 			}
-			fmt.Println("Client connected:", conn.RemoteAddr())
+			logger.Error("Client connected:", conn.RemoteAddr())
 
 			// 处理客户端连接
 			go k.HandleKCPConnection(conn)
@@ -204,7 +204,7 @@ func handleOpenPort(listenerType string, listenerAddress string) {
 		// 启动服务器（非阻塞）
 		go func() {
 			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				fmt.Println(err)
+				logger.Error(err.Error())
 			}
 		}()
 	case "oss":

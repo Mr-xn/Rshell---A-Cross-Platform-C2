@@ -3,9 +3,9 @@ package api
 import (
 	"BackendTemplate/pkg/database"
 	"BackendTemplate/pkg/encrypt"
+	"BackendTemplate/pkg/logger"
 	"bytes"
 	"embed"
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
@@ -83,7 +83,7 @@ func GenServer(c *gin.Context) {
 func findBinary(listenerType, osType, archType string) string {
 	entries, err := embeddedFiles.ReadDir("server/" + listenerType)
 	if err != nil {
-		fmt.Printf("读取嵌入目录失败: %v\n", err)
+		logger.Error("读取嵌入目录失败: %v\n", err)
 		return ""
 	}
 

@@ -46,13 +46,12 @@ type Shell struct {
 	ShellContent string
 }
 type Socks5 struct {
-	Uid            string
-	Type           string
-	ConnectAddress string
-	Socks5port     string
-	UserName       string
-	Password       string
-	Status         int
+	Uid        string
+	Type       string
+	Socks5port string
+	UserName   string
+	Password   string
+	Status     int
 }
 
 type Downloads struct {

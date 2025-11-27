@@ -5,6 +5,7 @@ import (
 	"BackendTemplate/pkg/connection"
 	"BackendTemplate/pkg/database"
 	"BackendTemplate/pkg/encrypt"
+	"BackendTemplate/pkg/logger"
 	"BackendTemplate/pkg/utils"
 	"BackendTemplate/pkg/webhooks"
 	"encoding/binary"
@@ -64,11 +65,11 @@ func process_server(name string) {
 		msg := message[4:]
 		tmpMetainfo, err := encrypt.DecodeBase64(msg)
 		if err != nil {
-			fmt.Println(err)
+			logger.Error(err.Error())
 		}
 		metainfo, err := encrypt.Decrypt(tmpMetainfo)
 		if err != nil {
-			fmt.Println(err)
+			logger.Error(err.Error())
 		}
 		uid := encrypt.BytesToMD5(metainfo)
 
@@ -124,11 +125,11 @@ func process_server(name string) {
 
 		tmpMetainfo, err := encrypt.DecodeBase64(metaMsg)
 		if err != nil {
-			fmt.Println(err)
+			logger.Error(err.Error())
 		}
 		metainfo, err := encrypt.Decrypt(tmpMetainfo)
 		if err != nil {
-			fmt.Println(err)
+			logger.Error(err.Error())
 		}
 		uid := encrypt.BytesToMD5(metainfo)
 
@@ -196,6 +197,10 @@ WHERE uid = ? AND file_path = ?;
 			filePath := string(data[4 : 4+filePathLen])
 			fileContent := data[4+filePathLen:]
 			command.VarFileContentQueue.Add(uid, filePath, string(fileContent))
+		case command.Socks5Data:
+			md5sign := data[:16]
+			rawData := data[16:]
+			command.VarSocks5Queue.Add(uid, fmt.Sprintf("%x", md5sign), string(rawData))
 		}
 	}
 	return

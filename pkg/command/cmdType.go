@@ -20,8 +20,7 @@ const (
 	CP              = 17
 	MV              = 18
 	FileContent     = 19
-	Socks5Start     = 20
-	Socks5Close     = 30
 	ExecuteAssembly = 40
 	InlineBin       = 41
+	Socks5Data      = 50
 )
